@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Three Clues</title>
+<style>
+/* Layout: one terminal-style column. Palette: ink background, cool white text, teal accent, amber for locked clues, red for wrong guesses. */
+:root {
+  color-scheme: dark;
+  --bg: #0c1117;
+  --panel: #131b24;
+  --fg: #d7e2ec;
+  --muted: #7d8da0;
+  --line: #243242;
+  --accent: #4fd1c5;
+  --accent-fg: #06201d;
+  --warn: #e6b450;
+  --bad: #ff6b6b;
+  --good: #7ee787;
+  --shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+  --mono: ui-monospace, "Cascadia Code", "Fira Code", Consolas, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  display: flex;
+  justify-content: center;
+  padding: 24px 16px 48px;
+}
+
+.app { width: 100%; max-width: 620px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+
+.path { margin: 0; color: var(--muted); font-size: 0.8rem; }
+.path b { color: var(--accent); font-weight: 600; }
+h1 { margin: 4px 0 0; font-size: 1.8rem; letter-spacing: 0.01em; }
+h1 span { color: var(--accent); }
+.sub { margin: 6px 0 0; color: var(--muted); font-size: 0.85rem; line-height: 1.5; }
+
+.stats { display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.8rem; }
+.pill {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 6px;
+  padding: 5px 10px;
+  color: var(--muted);
+}
+.pill strong { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
+.pill.cat strong { color: var(--accent); }
+
+.clues { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.clue {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  line-height: 1.55;
+  font-size: 0.92rem;
+}
+.clue .tag { flex: none; color: var(--accent); font-weight: 700; }
+.clue.new { border-color: var(--accent); }
+.clue.locked { color: var(--warn); border-style: dashed; }
+.clue.locked .tag { color: var(--warn); }
+
+.blanks { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.box {
+  width: 30px; height: 38px;
+  display: grid; place-items: center;
+  border-bottom: 3px solid var(--accent);
+  background: var(--panel);
+  border-radius: 4px 4px 0 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--good);
+}
+.len { text-align: center; color: var(--muted); font-size: 0.78rem; margin-top: -8px; }
+
+.msg { min-height: 1.4em; text-align: center; font-weight: 600; font-size: 0.9rem; }
+.msg.error { color: var(--bad); }
+.msg.info { color: var(--warn); }
+.msg.win { color: var(--good); font-size: 1rem; }
+
+.form { display: flex; gap: 8px; align-items: stretch; }
+.field {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 8px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+}
+.field:focus-within { border-color: var(--accent); }
+.field .ps { color: var(--accent); font-weight: 700; }
+input[type="text"] {
+  flex: 1; min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: var(--fg);
+  font: inherit;
+  font-size: 1.05rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 12px 0;
+}
+
+button {
+  font: inherit; font-weight: 700;
+  padding: 12px 18px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+.primary { background: var(--accent); color: var(--accent-fg); }
+.ghost { background: transparent; border-color: var(--line); color: var(--fg); }
+.danger { background: transparent; border-color: var(--bad); color: var(--bad); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.tried h2 { margin: 0 0 8px; font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  padding: 3px 9px;
+  border-radius: 4px;
+  border: 1px solid var(--bad);
+  color: var(--bad);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(3, 7, 11, 0.72);
+  display: grid; place-items: center;
+  padding: 16px;
+}
+.overlay[hidden] { display: none; }
+.modal {
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 440px; width: 100%;
+  box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 14px;
+}
+.modal h2 { margin: 0; font-size: 1.2rem; }
+.modal p { margin: 0; line-height: 1.55; font-size: 0.92rem; color: var(--muted); }
+.answer-word {
+  text-align: center;
+  font-size: 1.5rem;
+  letter-spacing: 0.15em;
+  font-weight: 800;
+  color: var(--accent);
+  word-break: break-all;
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <p class="path"><b>player</b>:~$ ./three_clues --level=hard</p>
+    <h1>Three Clues</h1>
+    <p class="sub">Find the hidden technical term. Clue 1 is free. Clues 2 and 3 unlock as you make attempts.</p>
+  </header>
+
+  <div class="stats">
+    <span class="pill">Attempts <strong id="count">0</strong></span>
+    <span class="pill cat">Subject <strong id="cat">-</strong></span>
+    <span class="pill">Terms asked <strong id="seen">-</strong></span>
+    <span class="pill">Popup at <strong>5</strong> · Reveal at <strong>10</strong></span>
+  </div>
+
+  <ol class="clues" id="clues"></ol>
+
+  <div class="blanks" id="blanks" aria-label="Hidden word"></div>
+  <div class="len" id="len"></div>
+
+  <div class="msg" id="msg" aria-live="polite"></div>
+
+  <div class="form" id="form">
+    <label class="field">
+      <span class="ps">&gt;</span>
+      <input type="text" id="guess" aria-label="Type your guess" placeholder="type your answer" maxlength="20" autocomplete="off" autofocus>
+    </label>
+    <button class="primary" type="button" id="submitBtn">Check</button>
+  </div>
+
+  <div class="actions">
+    <button class="danger" type="button" id="revealBtn" hidden>Reveal Answer</button>
+    <button class="ghost" type="button" id="newBtn">New Term</button>
+  </div>
+
+  <div class="tried" id="tried" hidden>
+    <h2>Wrong guesses</h2>
+    <div class="chips" id="chips"></div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+    <h2 id="mTitle"></h2>
+    <p id="mBody"></p>
+    <div class="answer-word" id="mAnswer" hidden></div>
+    <div class="actions" id="mActions"></div>
+  </div>
+</div>
+
+<script>
+// ---------- Terms: each has a subject and three clues (broad to specific) ----------
+const WORDS = [
+  { w: "DEADLOCK", cat: "Operating Systems", c: [
+    "Processes are stuck forever, each waiting for a resource held by another.",
+    "Four Coffman conditions must hold together: mutual exclusion, hold and wait, no preemption and circular wait.",
+    "The Banker's algorithm is used to avoid it, and a cycle in a resource allocation graph may indicate it."] },
+  { w: "SEMAPHORE", cat: "Operating Systems", c: [
+    "A synchronization tool introduced by Edsger Dijkstra.",
+    "It is an integer variable accessed only through two atomic operations, wait (P) and signal (V).",
+    "The counting version lets N threads into a critical section; the binary version only has the values 0 and 1."] },
+  { w: "THRASHING", cat: "Operating Systems", c: [
+    "A memory-management problem where the system spends more time swapping than doing useful work.",
+    "It happens when there are too many processes and too few frames, causing constant page faults.",
+    "The working-set model is one way to prevent it."] },
+  { w: "FRAGMENTATION", cat: "Operating Systems", c: [
+    "Memory is wasted because free space is split into unusable pieces.",
+    "It comes in two types: internal and external.",
+    "Paging avoids the external type, and compaction is a remedy for it."] },
+  { w: "KERNEL", cat: "Operating Systems", c: [
+    "The core component of an operating system.",
+    "It runs in privileged mode and manages the CPU, memory and devices.",
+    "System calls are the interface through which user programs request its services."] },
+  { w: "HYPERVISOR", cat: "OS / Cloud", c: [
+    "Software that creates and runs virtual machines.",
+    "Type 1 runs directly on hardware; type 2 runs on top of a host operating system.",
+    "KVM, Xen and VMware ESXi are examples."] },
+  { w: "NORMALIZATION", cat: "DBMS", c: [
+    "A database design technique used to reduce redundancy.",
+    "It progresses through forms such as 1NF, 2NF, 3NF and BCNF.",
+    "It removes insertion, update and deletion anomalies by decomposing relations using functional dependencies."] },
+  { w: "TRANSACTION", cat: "DBMS", c: [
+    "A logical unit of work in a database.",
+    "It must satisfy the ACID properties.",
+    "It ends with either COMMIT or ROLLBACK."] },
+  { w: "POLYMORPHISM", cat: "OOP", c: [
+    "An object-oriented pillar meaning one interface with many forms.",
+    "The compile-time form uses method overloading; the run-time form uses method overriding.",
+    "In C++ the run-time form works through virtual functions and a vtable."] },
+  { w: "ENCAPSULATION", cat: "OOP", c: [
+    "An OOP principle that bundles data together with the methods that work on it.",
+    "It restricts direct access to internal state using access modifiers such as private.",
+    "Getters and setters are used to control access to the hidden fields."] },
+  { w: "RECURSION", cat: "Programming", c: [
+    "A technique where a problem is solved using smaller instances of the same problem.",
+    "It needs a base case, otherwise it never stops and the program crashes.",
+    "Each call is pushed on the call stack, and too many frames cause a stack overflow."] },
+  { w: "DIJKSTRA", cat: "Data Structures & Algorithms", c: [
+    "A greedy algorithm for single-source shortest paths in a graph.",
+    "It does not work correctly when edges have negative weights.",
+    "With a min-priority queue its time complexity is O((V + E) log V); it is named after a Dutch computer scientist."] },
+  { w: "QUICKSORT", cat: "Data Structures & Algorithms", c: [
+    "A divide-and-conquer sorting algorithm.",
+    "It chooses a pivot and partitions the array around it.",
+    "Average time is O(n log n), but the worst case is O(n^2) when the pivot is badly chosen."] },
+  { w: "PIPELINING", cat: "Computer Architecture", c: [
+    "A CPU technique that overlaps the execution of several instructions.",
+    "A classic 5-stage version has fetch, decode, execute, memory access and write-back.",
+    "Its problems are called structural, data and control hazards, handled with forwarding and stalls."] },
+  { w: "HANDSHAKE", cat: "Computer Networks", c: [
+    "A networking exchange used to establish a reliable connection.",
+    "TCP uses a three-step version of it: SYN, SYN-ACK, ACK.",
+    "TLS performs a similar exchange to agree on cipher suites and keys before any data is sent."] },
+  { w: "SUBNETTING", cat: "Computer Networks", c: [
+    "Dividing one IP network into smaller logical networks.",
+    "A mask such as 255.255.255.192 decides how many bits belong to the network part.",
+    "CIDR notation such as /26 expresses the same idea."] },
+  { w: "ROUTER", cat: "Computer Networks", c: [
+    "A network device that forwards packets between different networks.",
+    "It makes decisions using a routing table and works at the network layer (Layer 3).",
+    "Protocols such as OSPF and BGP help it learn the best path."] },
+  { w: "SWITCH", cat: "Computer Networks", c: [
+    "A device that connects the machines inside a local network.",
+    "It works at the data link layer (Layer 2) and learns MAC addresses into a CAM table.",
+    "Unlike a hub, it forwards a frame only to the port of the destination device."] },
+  { w: "GATEWAY", cat: "Computer Networks", c: [
+    "A node that connects two networks, sometimes using different protocols.",
+    "A host sends traffic to it when the destination is outside its own subnet.",
+    "The default one is set in the network configuration, for example 192.168.1.1."] },
+  { w: "FIREWALL", cat: "Computer Networks", c: [
+    "A security system that monitors and filters network traffic.",
+    "It allows or blocks packets based on rules such as IP address, port and protocol.",
+    "Stateful versions track connections, and next-generation versions also inspect application data."] },
+  { w: "BANDWIDTH", cat: "Computer Networks", c: [
+    "The maximum amount of data a link can carry per unit of time.",
+    "It is measured in bits per second, such as Mbps or Gbps.",
+    "A wide link can still respond slowly, so do not confuse it with latency."] },
+  { w: "LATENCY", cat: "Computer Networks", c: [
+    "The time a packet takes to travel from source to destination.",
+    "Round-trip time (RTT) is commonly measured with the ping command.",
+    "It is measured in milliseconds and is the sum of propagation, transmission, queuing and processing delays."] },
+  { w: "TOPOLOGY", cat: "Computer Networks", c: [
+    "The layout in which devices in a network are arranged and connected.",
+    "Bus, ring, star and mesh are common examples.",
+    "It can be described physically (cabling) or logically (how data flows)."] },
+  { w: "ETHERNET", cat: "Computer Networks", c: [
+    "The most widely used wired LAN technology.",
+    "It is defined by the IEEE 802.3 standard.",
+    "Its frames carry 48-bit MAC addresses, and the older shared-medium version used CSMA/CD."] },
+  { w: "MULTICAST", cat: "Computer Networks", c: [
+    "A communication method where one sender transmits to a selected group of receivers.",
+    "It uses class D IP addresses (224.0.0.0 to 239.255.255.255).",
+    "IGMP is the protocol hosts use to join or leave such a group."] },
+  { w: "PROTOCOL", cat: "Computer Networks", c: [
+    "A set of rules that governs how devices communicate.",
+    "HTTP, FTP, TCP and IP are all examples.",
+    "It defines the message format, the order of messages and the action taken on sending or receiving them."] },
+  { w: "CHECKSUM", cat: "Computer Networks", c: [
+    "A value computed from data to detect transmission errors.",
+    "The sender calculates it and the receiver recalculates it to compare.",
+    "TCP, UDP and IP headers include one, calculated using ones' complement addition."] },
+  { w: "COMPILER", cat: "Compiler Design", c: [
+    "A program that translates source code into target code before execution.",
+    "Its phases include lexical analysis, syntax analysis, semantic analysis and code generation.",
+    "gcc and javac are examples; an interpreter works differently by executing the program step by step."] },
+  { w: "OVERFITTING", cat: "Machine Learning", c: [
+    "A model learns the training data too well, including its noise.",
+    "Training error is very low but test error is high.",
+    "Regularization, dropout, early stopping and cross-validation help reduce it."] },
+  { w: "BACKPROPAGATION", cat: "Machine Learning", c: [
+    "The core algorithm used to train neural networks.",
+    "It applies the chain rule to compute gradients layer by layer, from output back to input.",
+    "The weights are then updated using gradient descent."] },
+  { w: "STEGANOGRAPHY", cat: "Cyber Security", c: [
+    "A technique for hiding a secret message inside an ordinary-looking file.",
+    "Unlike encryption, it hides the existence of the message, not just its meaning.",
+    "A common method changes the least significant bits of image pixels."] },
+  { w: "HONEYPOT", cat: "Cyber Security", c: [
+    "A security mechanism that acts as bait for attackers.",
+    "It is a decoy system that looks vulnerable so defenders can study attacker behaviour.",
+    "Cowrie (SSH) and Dionaea are well-known open-source examples."] },
+  { w: "BLOCKCHAIN", cat: "Distributed Systems", c: [
+    "A distributed ledger shared by many nodes.",
+    "Each record stores the hash of the previous one, so tampering breaks the link.",
+    "Bitcoin uses proof of work to add new records to it."] }
+];
+
+const CLUE_UNLOCK = [0, 2, 4];  // attempts needed to unlock clue 1, 2 and 3
+const POPUP_AT = 5;             // popup asks whether to reveal the answer
+const REVEAL_AT = 10;           // reveal button appears on screen
+
+// ---------- State ----------
+let secret = "";
+let cat = "";
+let clues = [];
+let wrong = [];
+let attempts = 0;
+let finished = false;
+let popupShown = false;
+let newClueIndex = -1;
+
+// ---------- No repeats: terms already asked are remembered (also after refresh) ----------
+const STORE_KEY = "three-clues-asked";
+function loadSeen() {
+  try {
+    const v = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
+    return Array.isArray(v) ? v : [];
+  } catch (e) { return []; }
+}
+function saveSeen(list) {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(list)); } catch (e) { /* storage blocked: still no repeats until refresh */ }
+}
+let seen = loadSeen();
+let roundRestarted = false;
+
+function pickWord() {
+  seen = seen.filter((w) => WORDS.some((x) => x.w === w));
+  let pool = WORDS.filter((x) => !seen.includes(x.w));
+  roundRestarted = false;
+  if (pool.length === 0) {
+    seen = [];
+    pool = WORDS.slice();
+    roundRestarted = true;
+  }
+  const pick = pool[Math.floor(Math.random() * pool.length)];
+  seen.push(pick.w);
+  saveSeen(seen);
+  return pick;
+}
+
+// ---------- Elements ----------
+const $ = (id) => document.getElementById(id);
+const cluesEl = $("clues"), blanksEl = $("blanks"), lenEl = $("len"), msgEl = $("msg");
+const guessEl = $("guess"), submitBtn = $("submitBtn"), revealBtn = $("revealBtn");
+const countEl = $("count"), catEl = $("cat"), seenEl = $("seen"), triedEl = $("tried"), chipsEl = $("chips");
+const overlay = $("overlay"), mTitle = $("mTitle"), mBody = $("mBody");
+const mAnswer = $("mAnswer"), mActions = $("mActions");
+
+// ---------- Game logic ----------
+function unlockedCount() {
+  if (finished) return clues.length;
+  return CLUE_UNLOCK.filter((n) => attempts >= n).length;
+}
+
+function newGame() {
+  const pick = pickWord();
+  secret = pick.w;
+  cat = pick.cat;
+  clues = pick.c;
+  wrong = [];
+  attempts = 0;
+  finished = false;
+  popupShown = false;
+  newClueIndex = -1;
+  guessEl.value = "";
+  guessEl.disabled = false;
+  submitBtn.disabled = false;
+  setMsg("");
+  hideOverlay();
+  render();
+  if (roundRestarted) setMsg(`You have seen all ${WORDS.length} terms. A new round starts now.`, "info");
+  guessEl.focus();
+}
+
+function submitGuess() {
+  if (finished) return;
+  const g = guessEl.value.trim().toUpperCase();
+  if (g.length === 0) return setMsg("Type your answer first.", "error");
+  if (!/^[A-Z]+$/.test(g)) return setMsg("Use English letters only.", "error");
+  if (wrong.includes(g)) return setMsg("You already tried that.", "error");
+
+  const before = unlockedCount();
+  attempts++;
+  guessEl.value = "";
+
+  if (g === secret) {
+    finished = true;
+    guessEl.disabled = true;
+    submitBtn.disabled = true;
+    newClueIndex = -1;
+    render();
+    setMsg(`Correct! You solved it in ${attempts} attempt${attempts === 1 ? "" : "s"}.`, "win");
+    return;
+  }
+
+  wrong.push(g);
+  const after = unlockedCount();
+  newClueIndex = after > before ? after - 1 : -1;
+  setMsg(after > before ? `${g} is incorrect. Clue ${after} unlocked.` : `${g} is incorrect.`, after > before ? "info" : "error");
+  render();
+
+  if (attempts === POPUP_AT && !popupShown) {
+    popupShown = true;
+    showAskReveal();
+  }
+}
+
+function giveUp() {
+  finished = true;
+  guessEl.disabled = true;
+  submitBtn.disabled = true;
+  newClueIndex = -1;
+  render();
+  showAnswer();
+}
+
+// ---------- Rendering ----------
+function render() {
+  countEl.textContent = attempts;
+  catEl.textContent = cat;
+  seenEl.textContent = `${seen.length} / ${WORDS.length}`;
+
+  const open = unlockedCount();
+  cluesEl.innerHTML = "";
+  clues.forEach((text, i) => {
+    const li = document.createElement("li");
+    li.className = "clue" + (i < open ? "" : " locked") + (i === newClueIndex ? " new" : "");
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    tag.textContent = `[${i + 1}]`;
+    const body = document.createElement("span");
+    body.textContent = i < open ? text : `// locked: unlocks after ${CLUE_UNLOCK[i]} attempts`;
+    li.append(tag, body);
+    cluesEl.appendChild(li);
+  });
+
+  blanksEl.innerHTML = "";
+  secret.split("").forEach((ch) => {
+    const b = document.createElement("span");
+    b.className = "box";
+    b.textContent = finished ? ch : "";
+    blanksEl.appendChild(b);
+  });
+  lenEl.textContent = `${secret.length} letters`;
+
+  chipsEl.innerHTML = "";
+  wrong.forEach((w) => {
+    const c = document.createElement("span");
+    c.className = "chip";
+    c.textContent = w;
+    chipsEl.appendChild(c);
+  });
+  triedEl.hidden = wrong.length === 0;
+
+  revealBtn.hidden = !(attempts >= REVEAL_AT && !finished);
+}
+
+function setMsg(text, type) {
+  msgEl.textContent = text;
+  msgEl.className = "msg" + (type ? " " + type : "");
+}
+
+// ---------- Popups ----------
+function hideOverlay() { overlay.hidden = true; }
+
+function showAskReveal() {
+  mTitle.textContent = "5 attempts used";
+  mBody.textContent = "Do you want to reveal the answer, or keep trying?";
+  mAnswer.hidden = true;
+  mActions.innerHTML = "";
+  const yes = document.createElement("button");
+  yes.className = "danger";
+  yes.textContent = "Reveal answer";
+  yes.onclick = () => { hideOverlay(); giveUp(); };
+  const no = document.createElement("button");
+  no.className = "primary";
+  no.textContent = "Keep trying";
+  no.onclick = () => { hideOverlay(); guessEl.focus(); };
+  mActions.append(yes, no);
+  overlay.hidden = false;
+  no.focus();
+}
+
+function showAnswer() {
+  mTitle.textContent = "The answer was";
+  mBody.textContent = `Subject: ${cat}. Read about it once and it will stick. Try a new term.`;
+  mAnswer.textContent = secret;
+  mAnswer.hidden = false;
+  mActions.innerHTML = "";
+  const again = document.createElement("button");
+  again.className = "primary";
+  again.textContent = "New term";
+  again.onclick = newGame;
+  mActions.append(again);
+  overlay.hidden = false;
+  again.focus();
+}
+
+// ---------- Events ----------
+submitBtn.addEventListener("click", submitGuess);
+guessEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); submitGuess(); }
+});
+guessEl.addEventListener("input", () => {
+  guessEl.value = guessEl.value.replace(/[^a-zA-Z]/g, "");
+});
+revealBtn.addEventListener("click", giveUp);
+$("newBtn").addEventListener("click", newGame);
+
+newGame();
+</script>
+</body>
+</html>
